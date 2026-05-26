@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电力数据分析系统 (全量扫描+多表完美兼容版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <style>
+        /* =========================================
+           1. 样式定义
+           ========================================= */
+        :root {
+            --bg-primary: #0b1222;
+            --bg-secondary: #1e293b;
+            --bg-card: rgba(30, 41, 59, 0.9);
+            --accent-primary: #00f2ff;
+            --accent-secondary: #f59e0b;
+            --accent-calc: #a855f7; /* 运算系列专用紫色 */
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: rgba(148, 163, 184, 0.15);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-primary); color: var(--text-primary);
+            height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        header {
+            padding: 0.6rem 1.2rem; background: rgba(15, 23, 42, 0.95);
+            border-bottom: 1px solid var(--border-color);
+            display: flex; justify-content: space-between; align-items: center; z-index: 100;
+        }
+        .header-tools { display: flex; gap: 12px; align-items: center; }
+        .btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: 0.2s; }
+        .btn:hover { background: rgba(255,255,255,0.1); }
+        .btn-active { background: var(--accent-primary) !important; color: #000 !important; font-weight: bold; }
+        .btn-primary { background: #3b82f6; border-color: #3b82f6; }
+
+        .main-container { display: flex; flex: 1; padding: 0.8rem; gap: 0.8rem; height: calc(100vh - 55px); }
+
+        .sidebar { width: 280px; min-width: 280px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+        .sidebar-section { display: flex; flex-direction: column; border-bottom: 1px solid var(--border-color); flex: 1; min-height: 0; }
+        .sidebar-header { padding: 0.7rem 1rem; background: rgba(255, 255, 255, 0.03); font-size: 0.8rem; font-weight: bold; color: var(--accent-primary); display: flex; justify-content: space-between; align-items: center; }
+        .list-container { flex: 1; overflow-y: auto; padding: 0.4rem; scrollbar-width: thin; }
+
+        .date-folder { padding: 6px 8px; font-size: 0.75rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .folder-label { display: flex; align-items: center; gap: 6px; color: #fff; flex: 1; }
+        .folder-label::before { content: '▶'; font-size: 0.6rem; transition: 0.2s; display: inline-block; width: 12px; }
+        .open > .folder-label::before { transform: rotate(90deg); }
+        .date-level { margin-left: 12px; border-left: 1px solid var(--border-color); display: none; }
+        .bulk-link { font-size: 0.6rem; color: var(--accent-primary); opacity: 0.7; cursor: pointer; white-space: nowrap; }
+        .bulk-link:hover { opacity: 1; text-decoration: underline; }
+
+        .item-row { padding: 0.5rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
+        .item-row:hover { background: rgba(0, 242, 255, 0.08); color: #fff; }
+        .item-row.active { background: var(--accent-primary) !important; color: #000 !important; font-weight: bold; }
+
+        .dashboard-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .stats-panel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 0.8rem; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.8rem; }
+        .stat-label { font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 4px; }
+        .stat-value { font-size: 1.1rem; font-weight: bold; color: var(--accent-primary); }
+
+        .threshold-panel {
+            background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px;
+            padding: 0.8rem 1rem; margin-bottom: 0.8rem; display: flex; align-items: center; gap: 1.2rem;
+        }
+        .threshold-section { display: flex; align-items: center; gap: 0.5rem; }
+        .threshold-label { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+        .threshold-input { width: 75px; padding: 0.3rem 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 0.75rem; text-align: center; }
+        
+        .integral-result {
+            display: flex; align-items: center; gap: 0.8rem; padding: 0.3rem 0.8rem;
+            background: rgba(0, 242, 255, 0.1); border: 1px solid rgba(0, 242, 255, 0.3); border-radius: 6px; margin-left: auto;
+        }
+        .integral-value { font-size: 1rem; font-weight: bold; color: var(--accent-primary); }
+
+        .chart-card { flex: 1; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border-color); padding: 1rem; display: flex; flex-direction: column; position: relative; }
+        #chartContainer { flex: 1; width: 100%; }
+
+        .series-control-panel { margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--border-color); }
+        .series-scroll-area { max-height: 80px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+        .series-chip { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; padding: 2px 10px; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.3); cursor: pointer; }
+        .series-chip.checked { border-color: var(--accent-primary); color: var(--accent-primary); background: rgba(0, 242, 255, 0.1); }
+        .series-chip.is-calc { border-color: var(--accent-calc); color: var(--accent-calc); }
+        .series-chip.is-calc.checked { background: rgba(168, 85, 247, 0.2); }
+        .series-chip input { display: none; }
+
+        .calc-tools { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); }
+
+        .loading-overlay { position: fixed; inset: 0; background: rgba(11, 18, 34, 0.8); display: none; place-items: center; z-index: 999; }
+    </style>
+</head>
+<body>
+
+    <div id="loading" class="loading-overlay"><div style="color: var(--accent-primary)">数据加载中...</div></div>
+
+    <header>
+        <div style="font-size: 1rem; font-weight: bold;">⚡ 电力数据分析系统</div>
+        <div class="header-tools">
+            <div class="mode-switch">
+                <button id="modeOverlay" class="btn btn-active" onclick="App.switchMode('overlay')">叠加分析</button>
+                <button id="modeTimeline" class="btn" onclick="App.switchMode('timeline')">时序分析</button>
+            </div>
+            <button class="btn" onclick="document.getElementById('dirInput').click()">📁 导入文件夹</button>
+            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📄 选择文件</button>
+            <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple hidden>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-header">文件列表</div>
+                <div id="fileList" class="list-container"></div>
+            </div>
+            <div class="sidebar-section" id="sheetSection" style="display:none;">
+                <div class="sidebar-header">工作表 (Sheet)</div>
+                <div id="sheetList" class="list-container"></div>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-header">
+                    日期筛选
+                    <div style="display:flex; gap:8px">
+                        <span class="bulk-link" onclick="UI.toggleAllDates(false)">清空</span>
+                        <input type="checkbox" id="selectAllDate" checked onclick="UI.toggleAllDates(this.checked)">
+                    </div>
+                </div>
+                <div id="dateList" class="list-container"></div>
+            </div>
+        </div>
+
+        <div class="dashboard-main">
+            <div class="stats-panel">
+                <div class="stat-card"><div class="stat-label">峰值 (kW)</div><div id="statMax" class="stat-value">-</div></div>
+                <div class="stat-card"><div class="stat-label">均值 (kW)</div><div id="statAvg" class="stat-value">-</div></div>
+                <div class="stat-card"><div class="stat-label">负荷率 (%)</div><div id="statRate" class="stat-value">-</div></div>
+                <div class="stat-card"><div class="stat-label">记录天数</div><div id="statDays" class="stat-value">-</div></div>
+            </div>
+
+            <div class="threshold-panel">
+                <div class="threshold-section">
+                    <span class="threshold-label">模式：</span>
+                    <button id="modeAbsolute" class="btn btn-active" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="App.setThresholdMode('absolute')">固定值</button>
+                    <button id="modeRelative" class="btn" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="App.setThresholdMode('relative')">峰值插值</button>
+                </div>
+                <div class="threshold-section">
+                    <span class="threshold-label">降需线：</span>
+                    <input type="number" id="thresholdInput" class="threshold-input" value="0" step="0.1" onchange="App.updateThresholdValue(this.value)">
+                </div>
+                <div class="threshold-section" id="offsetSection" style="display:none;">
+                    <span class="threshold-label">偏移(kW)：</span>
+                    <input type="number" id="offsetInput" class="threshold-input" value="120" step="0.1" onchange="App.recalculateThreshold()">
+                </div>
+                <div class="threshold-section">
+                    <button class="btn" id="btnShowLine" onclick="App.toggleThresholdLine()">显示降需线</button>
+                </div>
+                
+                <div class="integral-result">
+                    <div style="display:flex; align-items: baseline; gap: 3px;">
+                        <span style="font-size:0.7rem; color:var(--text-secondary)">积分：</span>
+                        <span id="integralValue" class="integral-value">0.00</span>
+                        <span style="font-size:0.7rem; color:var(--text-secondary)">kWh /</span>
+                        <span id="integralDuration" class="integral-value">0.0</span>
+                        <span style="font-size:0.7rem; color:var(--text-secondary)">h</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-card" id="fullTarget">
+                <div class="chart-actions" style="position:absolute; top:12px; right:20px; z-index:100; display:flex; gap:8px;">
+                    <button class="btn" onclick="UI.toggleFullScreen()">全屏</button>
+                    <button class="btn" onclick="UI.downloadImage()">下载</button>
+                </div>
+                <div id="chartContainer"></div>
+                <div class="series-control-panel">
+                    <div class="series-scroll-area" id="seriesContainer"></div>
+                    <div class="calc-tools">
+                        <span style="font-size:0.7rem; color:var(--text-secondary)">曲线运算：</span>
+                        <button class="btn" style="padding: 2px 8px; font-size: 0.65rem;" onclick="App.createVirtualSeries('add')">所选相加 (+)</button>
+                        <button class="btn" style="padding: 2px 8px; font-size: 0.65rem;" onclick="App.createVirtualSeries('sub')">所选相减 (-)</button>
+                        <div style="flex:1"></div>
+                        <span onclick="UI.bulkToggleSeries(true)" style="cursor:pointer; color:var(--accent-primary); font-size:0.65rem">全选</span>
+                        <span onclick="UI.bulkToggleSeries(false)" style="cursor:pointer; color:var(--text-secondary); font-size:0.65rem; margin-left:10px">取消</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* =========================================
+           2. 核心状态管理 (State)
+           ========================================= */
+        const State = {
+            allFiles: [],
+            currentWorkbook: null,
+            currentMode: 'overlay',
+            data: { days: {}, selectedDays: [], columns: [], tree: {} },
+            activeSeries: new Set(),
+            virtualSeries: [], // 存储格式: {id, name, op, targets:[]}
+            expanded: new Set(),
+            threshold: {
+                mode: 'absolute',
+                value: 0,
+                offset: 120,
+                showLine: true,
+                effective: 0
+            },
+            priceAreas: [
+                { name: '谷', color: 'rgba(34, 197, 94, 0.08)', start: '00:00', end: '08:00' },
+                { name: '平', color: 'rgba(234, 179, 8, 0.05)', start: '08:00', end: '10:00' },
+                { name: '峰', color: 'rgba(239, 68, 68, 0.08)', start: '10:00', end: '12:00' },
+                { name: '平', color: 'rgba(234, 179, 8, 0.05)', start: '12:00', end: '14:00' },
+                { name: '峰', color: 'rgba(239, 68, 68, 0.08)', start: '14:00', end: '17:00' },
+                { name: '平', color: 'rgba(234, 179, 8, 0.05)', start: '17:00', end: '19:00' },
+                { name: '峰', color: 'rgba(239, 68, 68, 0.08)', start: '19:00', end: '22:00' },
+                { name: '谷', color: 'rgba(34, 197, 94, 0.08)', start: '22:00', end: '24:00' }
+            ]
+        };
+
+        /* =========================================
+           3. 数据处理引擎 (DataEngine)
+           ========================================= */
+        const DataEngine = {
+            async parse(file) {
+                const buf = await file.arrayBuffer();
+                State.currentWorkbook = XLSX.read(buf, { type: 'array', cellDates: true });
+                return State.currentWorkbook.SheetNames;
+            },
+
+            process(name) {
+                const rows = XLSX.utils.sheet_to_json(State.currentWorkbook.Sheets[name], { defval: 0 });
+                if (!rows.length) return;
+
+                const keys = Object.keys(rows[0]);
+                const dKey = keys.find(k => k === '日期' || k.includes('Date'));
+                const tKey = keys.find(k => k === '时间' || k.includes('Time'));
+
+                // --- 终极修复方案：全量扫描+尽早退出 ---
+                const validCols = [];
+                keys.forEach(k => {
+                    // 剔除时间列和 SheetJS 生成的无用幽灵列
+                    if (k === dKey || k === tKey || k.startsWith('__EMPTY')) return;
+
+                    let isValid = true; 
+                    for (let i = 0; i < rows.length; i++) {
+                        let val = rows[i][k];
+                        let strVal = String(val).trim();
+                        
+                        // 忽略完全空白或横线占位符。只要发现真正的字符，就开始判断
+                        if (strVal !== '' && strVal !== '-' && strVal !== 'null') {
+                            if (isNaN(parseFloat(strVal))) {
+                                isValid = false; // 发现纯文本（如“检修中”），判定该列无效
+                            }
+                            break; // 已找到首个有意义的值，尽早跳出循环，提升性能
+                        }
+                    }
+                    // 如果扫描结束仍为true (证明全部为空，或是数值列)，则保留
+                    if (isValid) validCols.push(k);
+                });
+                State.data.columns = validCols;
+                State.virtualSeries = []; // 切换Sheet时清空运算系列
+                
+                // --- 解决多Sheet切换状态残留导致的白屏问题 ---
+                const nextActive = new Set();
+                State.activeSeries.forEach(s => {
+                    // 只保留新Sheet中确实存在的系列
+                    if (State.data.columns.includes(s)) {
+                        nextActive.add(s);
+                    }
+                });
+                State.activeSeries = nextActive;
+                
+                // 如果经过清洗后，没有任何选中的系列，则默认选中第一个有效的（防白屏）
+                if (!State.activeSeries.size && State.data.columns.length > 0) {
+                    State.activeSeries = new Set([State.data.columns[0]]);
+                }
+
+                const days = {}, tree = {};
+                rows.forEach(r => {
+                    let dObj;
+                    if (r['日期'] && r['时间']) {
+                        let dPart = r['日期'] instanceof Date ? r['日期'].toLocaleDateString('en-CA') : String(r['日期']).split(' ')[0];
+                        dObj = new Date(`${dPart} ${r['时间']}`);
+                    } else {
+                        dObj = r[dKey || tKey];
+                        if (!(dObj instanceof Date)) dObj = new Date(String(dObj).replace(/\//g, '-'));
+                    }
+                    if (isNaN(dObj.getTime())) return;
+
+                    const dStr = dObj.toLocaleDateString('en-CA'), tStr = dObj.toTimeString().split(' ')[0].substring(0, 5);
+                    if (!days[dStr]) days[dStr] = [];
+                    days[dStr].push({ ...r, _t: tStr, _ts: dObj.getTime() });
+
+                    const Y = dObj.getFullYear(), M = String(dObj.getMonth() + 1).padStart(2, '0');
+                    if (!tree[Y]) tree[Y] = {}; if (!tree[Y][M]) tree[Y][M] = [];
+                    if (!tree[Y][M].includes(dStr)) tree[Y][M].push(dStr);
+                });
+
+                State.data.days = days; State.data.tree = tree;
+                State.data.selectedDays = Object.keys(days).sort().slice(-7);
+                UI.renderTree(); UI.renderSeries(); App.recalculateThreshold();
+            },
+
+            calcInteg(pts, th) {
+                let area = 0, dur = 0;
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const dt = (pts[i+1][0] - pts[i][0]) / 3600000;
+                    const v1 = Math.max(0, pts[i][1] - th), v2 = Math.max(0, pts[i+1][1] - th);
+                    if (v1 > 0 || v2 > 0) { area += (v1 + v2) / 2 * dt; dur += dt; }
+                }
+                return { area, dur };
+            }
+        };
+
+        /* =========================================
+           4. 图表渲染 (ChartEngine)
+           ========================================= */
+        const ChartEngine = {
+            instance: null,
+            init() { 
+                this.instance = echarts.init(document.getElementById('chartContainer'), 'dark'); 
+                window.onresize = () => this.instance.resize();
+            },
+            update() {
+                if (!State.data.selectedDays.length || (!State.activeSeries.size && !State.virtualSeries.some(v=>State.activeSeries.has(v.id)))) { 
+                    this.instance.clear(); return; 
+                }
+                const series = [], dates = [...State.data.selectedDays].sort();
+                let maxV = 0, sumV = 0, countV = 0, tA = 0, tD = 0;
+
+                const base = {
+                    grid: { left: '3%', right: '3%', bottom: '60px', top: '50px', containLabel: true },
+                    tooltip: { trigger: 'axis' },
+                    dataZoom: [{type: 'inside'}, {type: 'slider', bottom: 10, height: 20}]
+                };
+
+                const allToDraw = [];
+                State.activeSeries.forEach(id => {
+                    const v = State.virtualSeries.find(vs => vs.id === id);
+                    allToDraw.push(v ? v : { id: id, isRaw: true });
+                });
+
+                if (State.currentMode === 'overlay') {
+                    const times = Array.from(new Set(Object.values(State.data.days).flat().map(p => p._t))).sort();
+                    
+                    dates.forEach((d, di) => {
+                        allToDraw.forEach((sObj, si) => {
+                            const dayData = State.data.days[d] || [];
+                            
+                            // 1. 获取真实原始点用于精准积分计算，并寻找有效时间边界（电子围栏）
+                            const rawPts = [];
+                            let minT = null, maxT = null;
+                            
+                            dayData.forEach(p => {
+                                let v = null;
+                                if (sObj.isRaw) {
+                                    if (p[sObj.id] !== undefined && p[sObj.id] !== '') v = parseFloat(p[sObj.id]);
+                                } else {
+                                    const vals = sObj.targets.map(tid => parseFloat(p[tid]) || 0);
+                                    v = sObj.op === 'add' ? vals.reduce((a,b)=>a+b, 0) : vals[0] - (vals[1] || 0);
+                                }
+                                
+                                if (v !== null && !isNaN(v)) {
+                                    rawPts.push([p._ts, v]);
+                                    if (!minT || p._t < minT) minT = p._t;
+                                    if (!maxT || p._t > maxT) maxT = p._t;
+                                }
+                            });
+                            
+                            // 利用最真实的采血点积分，避免插值影响面积
+                            rawPts.sort((a,b) => a[0] - b[0]);
+                            const res = DataEngine.calcInteg(rawPts, State.threshold.effective);
+                            tA += res.area; 
+                            tD += res.dur;
+
+                            // 2. 生成图表渲染用数组（受限于电子围栏，避免向未知未来直线延伸）
+                            const line = [];
+                            let lastValidV = 0;
+                            
+                            times.forEach(t => {
+                                if (!minT || !maxT || t < minT || t > maxT) {
+                                    line.push(null); // 超出电子围栏，填充null以断开直线
+                                } else {
+                                    const row = dayData.find(p => p._t === t);
+                                    let v = null;
+                                    
+                                    if (row) {
+                                        if (sObj.isRaw) {
+                                            if (row[sObj.id] !== undefined && row[sObj.id] !== '') v = parseFloat(row[sObj.id]);
+                                        } else {
+                                            const vals = sObj.targets.map(tid => parseFloat(row[tid]) || 0);
+                                            v = sObj.op === 'add' ? vals.reduce((a,b)=>a+b, 0) : vals[0] - (vals[1] || 0);
+                                        }
+                                    }
+                                    
+                                    if (v !== null && !isNaN(v)) {
+                                        lastValidV = v; 
+                                    } else {
+                                        v = lastValidV; // 在有效区间内进行前向插补
+                                    }
+                                    
+                                    if(v > maxV) maxV = v; 
+                                    sumV += v; countV++;
+                                    line.push(v);
+                                }
+                            });
+
+                            // 若当日只有孤立单点，则展示为圆点；其余显示纯净折线
+                            const symbolType = rawPts.length === 1 ? 'circle' : 'none';
+                            const symbolSize = rawPts.length === 1 ? 6 : 4;
+
+                            series.push({
+                                name: `${d} ${sObj.name || sObj.id}`, type: 'line', smooth: true, 
+                                symbol: symbolType, symbolSize: symbolSize, connectNulls: false,
+                                data: line,
+                                lineStyle: sObj.isRaw ? {} : { color: '#a855f7', width: 2 },
+                                itemStyle: sObj.isRaw ? {} : { color: '#a855f7' },
+                                markArea: (di===0 && si===0) ? { silent: true, data: State.priceAreas.map(a => [{ xAxis: a.start, itemStyle: {color: a.color} }, { xAxis: a.end }]) } : null
+                            });
+                        });
+                    });
+                    this.instance.setOption({ ...base, xAxis: { type: 'category', data: times }, yAxis: { type: 'value' }, series }, true);
+                
+                } else {
+                    // 时序分析模式同理，仅采用真实数据点
+                    allToDraw.forEach(sObj => {
+                        const pts = [];
+                        dates.forEach(d => {
+                            const dayData = State.data.days[d] || [];
+                            dayData.forEach(p => {
+                                let v = null;
+                                if(sObj.isRaw) {
+                                    if (p[sObj.id] !== undefined && p[sObj.id] !== '') v = parseFloat(p[sObj.id]);
+                                } else {
+                                    const vals = sObj.targets.map(tid => parseFloat(p[tid]) || 0);
+                                    v = sObj.op === 'add' ? vals.reduce((a,b)=>a+b, 0) : vals[0] - (vals[1] || 0);
+                                }
+                                if (v !== null && !isNaN(v)) {
+                                    if(v > maxV) maxV = v; sumV += v; countV++;
+                                    pts.push([p._ts, v]);
+                                }
+                            });
+                        });
+                        pts.sort((a,b)=>a[0]-b[0]);
+                        const res = DataEngine.calcInteg(pts, State.threshold.effective);
+                        tA += res.area; tD += res.dur;
+                        
+                        const symbolType = pts.length === 1 ? 'circle' : 'none';
+                        const symbolSize = pts.length === 1 ? 6 : 4;
+
+                        series.push({ 
+                            name: sObj.name || sObj.id, type: 'line', smooth: true, 
+                            symbol: symbolType, symbolSize: symbolSize, connectNulls: false,
+                            data: pts, 
+                            lineStyle: sObj.isRaw ? {} : { color: '#a855f7', width: 2 },
+                            itemStyle: sObj.isRaw ? {} : { color: '#a855f7' }
+                        });
+                    });
+                    this.instance.setOption({ ...base, xAxis: { type: 'time' }, yAxis: { type: 'value' }, series }, true);
+                }
+
+                if (State.threshold.showLine) {
+                    this.instance.setOption({ series: [...this.instance.getOption().series, { name: '降需', type: 'line', markLine: { symbol: 'none', data: [{ yAxis: State.threshold.effective }] } }] });
+                }
+
+                UI.upStats({ maxV, avg: countV ? (sumV/countV) : 0, rate: (countV && maxV) ? ((sumV/countV)/maxV*100) : 0, days: dates.length, tA, tD });
+            }
+        };
+
+        /* =========================================
+           5. 界面交互 (UI)
+           ========================================= */
+        const UI = {
+            renderFiles(activeIndex = 0) {
+                const list = document.getElementById('fileList'); list.innerHTML = '';
+                State.allFiles.forEach((f, i) => {
+                    const d = document.createElement('div'); 
+                    d.className = `item-row ${i === activeIndex ? 'active' : ''}`;
+                    d.innerHTML = `📄 ${f.name.substring(0, 20)}`;
+                    d.onclick = () => App.loadFile(i); list.appendChild(d);
+                });
+            },
+            
+            renderTree() {
+                const container = document.getElementById('dateList'); container.innerHTML = '';
+                Object.keys(State.data.tree).sort().forEach(y => {
+                    const yBox = document.createElement('div'); yBox.className = `date-folder ${State.expanded.has(y)?'open':''}`;
+                    yBox.innerHTML = `<span class="folder-label" onclick="UI.toggleF('${y}')">${y}年</span><span class="bulk-link" onclick="UI.bulk('y','${y}')">[全选]</span>`;
+                    const yCont = document.createElement('div'); yCont.className = 'date-level'; yCont.id = `f-${y}`; yCont.style.display = State.expanded.has(y)?'block':'none';
+                    Object.keys(State.data.tree[y]).sort().forEach(m => {
+                        const mid = `${y}-${m}`;
+                        const mBox = document.createElement('div'); mBox.className = `date-folder ${State.expanded.has(mid)?'open':''}`;
+                        mBox.innerHTML = `<span class="folder-label" onclick="UI.toggleF('${mid}')">${m}月</span><span class="bulk-link" onclick="UI.bulk('m','${mid}')">[全选]</span>`;
+                        const mCont = document.createElement('div'); mCont.className = 'date-level'; mCont.id = `f-${mid}`; mCont.style.display = State.expanded.has(mid)?'block':'none';
+                        State.data.tree[y][m].sort().forEach(d => {
+                            const isSelected = State.data.selectedDays.includes(d);
+                            const row = document.createElement('div'); 
+                            row.className = `item-row`;
+                            row.innerHTML = `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="UI.toggleD('${d}',this.checked)"> ${d.split('-')[2]}日`;
+                            mCont.appendChild(row);
+                        });
+                        yCont.appendChild(mBox); yCont.appendChild(mCont);
+                    });
+                    container.appendChild(yBox); container.appendChild(yCont);
+                });
+            },
+
+            toggleF(id) { const el = document.getElementById(`f-${id}`); const open = el.style.display === 'none'; el.style.display = open ? 'block' : 'none'; el.previousElementSibling.classList.toggle('open', open); open?State.expanded.add(id):State.expanded.delete(id); },
+            bulk(type, val) {
+                let ds = []; if(type==='y') Object.values(State.data.tree[val]).forEach(m=>ds.push(...m)); else { const [y,m]=val.split('-'); ds=State.data.tree[y][m]; }
+                ds.forEach(d => { if(!State.data.selectedDays.includes(d)) State.data.selectedDays.push(d); });
+                this.renderTree(); App.recalculateThreshold();
+            },
+            toggleD(d, s) { 
+                if(s) State.data.selectedDays.push(d); 
+                else State.data.selectedDays = State.data.selectedDays.filter(x=>x!==d); 
+                App.recalculateThreshold(); 
+            },
+            toggleAllDates(s) { State.data.selectedDays = s ? Object.keys(State.data.days) : []; this.renderTree(); App.recalculateThreshold(); },
+            
+            renderSeries() {
+                const c = document.getElementById('seriesContainer'); c.innerHTML = '';
+                // 渲染原始系列
+                State.data.columns.forEach(col => {
+                    const l = document.createElement('label'); l.className = `series-chip ${State.activeSeries.has(col)?'checked':''}`;
+                    l.innerHTML = `<input type="checkbox" ${State.activeSeries.has(col)?'checked':''} onchange="UI.toggleS('${col}',this.checked)">${col}`;
+                    c.appendChild(l);
+                });
+                // 渲染虚拟计算系列
+                State.virtualSeries.forEach(vs => {
+                    const l = document.createElement('label'); l.className = `series-chip is-calc ${State.activeSeries.has(vs.id)?'checked':''}`;
+                    l.innerHTML = `<input type="checkbox" ${State.activeSeries.has(vs.id)?'checked':''} onchange="UI.toggleS('${vs.id}',this.checked)">${vs.name} <span onclick="App.removeVirtual('${vs.id}')" style="margin-left:5px; opacity:0.5">×</span>`;
+                    c.appendChild(l);
+                });
+            },
+            toggleS(n, c) { c ? State.activeSeries.add(n) : State.activeSeries.delete(n); this.renderSeries(); App.recalculateThreshold(); },
+            bulkToggleSeries(s) { State.activeSeries = s ? new Set([...State.data.columns, ...State.virtualSeries.map(v=>v.id)]) : new Set(); this.renderSeries(); App.recalculateThreshold(); },
+
+            upStats(s) {
+                document.getElementById('statMax').innerText = s.maxV.toFixed(2);
+                document.getElementById('statAvg').innerText = s.avg.toFixed(2);
+                document.getElementById('statRate').innerText = s.rate.toFixed(1);
+                document.getElementById('statDays').innerText = s.days;
+                document.getElementById('integralValue').innerText = s.tA.toFixed(2);
+                document.getElementById('integralDuration').innerText = s.tD.toFixed(1);
+            },
+            toggleFullScreen() { const t = document.getElementById('fullTarget'); if(!document.fullscreenElement) t.requestFullscreen(); else document.exitFullscreen(); setTimeout(()=>ChartEngine.instance.resize(), 100); },
+            downloadImage() { const a = document.createElement('a'); a.href = ChartEngine.instance.getDataURL({pixelRatio:2}); a.download = '电力分析.png'; a.click(); }
+        };
+
+        /* =========================================
+           6. 应用控制器 (App)
+           ========================================= */
+        const App = {
+            init() {
+                ChartEngine.init();
+                document.getElementById('fileInput').onchange = (e) => this.handle(e.target.files);
+                document.getElementById('dirInput').onchange = (e) => this.handle(e.target.files);
+            },
+            async handle(files) {
+                const fs = Array.from(files).filter(f => f.name.match(/\.(xlsx|xls|csv)$/i));
+                if (!fs.length) return; State.allFiles = fs; UI.renderFiles(); this.loadFile(0);
+            },
+            async loadFile(idx) {
+                document.getElementById('loading').style.display = 'grid';
+                UI.renderFiles(idx);
+                try {
+                    const names = await DataEngine.parse(State.allFiles[idx]);
+                    document.getElementById('sheetSection').style.display = names.length > 1 ? 'flex' : 'none';
+                    const sList = document.getElementById('sheetList'); sList.innerHTML = '';
+                    names.forEach((n, sIdx) => {
+                        const d = document.createElement('div'); 
+                        d.className = `item-row ${sIdx === 0 ? 'active' : ''}`; 
+                        d.innerText = n;
+                        d.onclick = function() {
+                            Array.from(sList.children).forEach(el => el.classList.remove('active'));
+                            this.classList.add('active');
+                            DataEngine.process(n);
+                        };
+                        sList.appendChild(d);
+                    });
+                    DataEngine.process(names[0]);
+                } catch(e) { alert("读取失败"); }
+                document.getElementById('loading').style.display = 'none';
+            },
+
+            // --- 曲线运算逻辑 ---
+            createVirtualSeries(op) {
+                const selected = Array.from(State.activeSeries).filter(id => State.data.columns.includes(id));
+                if (selected.length < 2) return alert("请先在上方勾选至少两个原始列进行运算");
+                
+                const id = 'v_' + Date.now();
+                const name = op === 'add' ? `合计(${selected.length}项)` : `${selected[0].substring(0,5)}-${selected[1].substring(0,5)}`;
+                
+                State.virtualSeries.push({ id, name, op, targets: [...selected] });
+                State.activeSeries.add(id);
+                UI.renderSeries();
+                this.recalculateThreshold();
+            },
+            removeVirtual(id) {
+                State.virtualSeries = State.virtualSeries.filter(v => v.id !== id);
+                State.activeSeries.delete(id);
+                UI.renderSeries();
+                this.recalculateThreshold();
+            },
+
+            switchMode(m) { 
+                State.currentMode = m; 
+                document.getElementById('modeOverlay').classList.toggle('btn-active', m==='overlay');
+                document.getElementById('modeTimeline').classList.toggle('btn-active', m==='timeline');
+                ChartEngine.update(); 
+            },
+            setThresholdMode(m) {
+                State.threshold.mode = m;
+                document.getElementById('modeAbsolute').classList.toggle('btn-active', m==='absolute');
+                document.getElementById('modeRelative').classList.toggle('btn-active', m==='relative');
+                document.getElementById('offsetSection').style.display = m==='relative'?'flex':'none';
+                this.recalculateThreshold();
+            },
+            
+            recalculateThreshold() {
+                const offVal = parseFloat(document.getElementById('offsetInput').value) || 0;
+                State.threshold.offset = offVal;
+
+                if (State.threshold.mode === 'relative') {
+                    let max = 0;
+                    const dates = State.data.selectedDays;
+                    const allToDraw = Array.from(State.activeSeries).map(id => {
+                        const v = State.virtualSeries.find(vs => vs.id === id);
+                        return v || { id, isRaw: true };
+                    });
+
+                    dates.forEach(d => (State.data.days[d] || []).forEach(p => {
+                        allToDraw.forEach(sObj => {
+                            let v = 0;
+                            if(sObj.isRaw) v = parseFloat(p[sObj.id]) || 0;
+                            else {
+                                const vals = sObj.targets.map(tid => parseFloat(p[tid]) || 0);
+                                v = sObj.op === 'add' ? vals.reduce((a,b)=>a+b, 0) : vals[0] - (vals[1] || 0);
+                            }
+                            if(v > max) max = v;
+                        });
+                    }));
+                    State.threshold.effective = Math.max(0, max - State.threshold.offset);
+                    document.getElementById('thresholdInput').value = State.threshold.effective.toFixed(1);
+                } else {
+                    State.threshold.effective = State.threshold.value;
+                }
+                ChartEngine.update();
+            },
+
+            updateThresholdValue(v) { State.threshold.value = parseFloat(v) || 0; if(State.threshold.mode==='absolute') this.recalculateThreshold(); },
+            toggleThresholdLine() { 
+                State.threshold.showLine = !State.threshold.showLine; 
+                document.getElementById('btnShowLine').classList.toggle('btn-active', State.threshold.showLine);
+                ChartEngine.update(); 
+            }
+        };
+
+        App.init();
+    </script>
+</body>
+</html>
